@@ -1,0 +1,76 @@
+name: Self-Hosted CI with Local Docker & Kubernetes.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  build-deploy:
+    runs-on: self-hosted
+
+    steps:
+      # Step 1: Checkout repository
+      - name: Checkout repository
+        uses: actions/checkout@v3
+
+      # Step 2: Ensure Docker is available
+      - name: Docker version
+        run: docker --version
+
+      # Step 3: Build local Docker image
+      - name: Build Docker image
+        run: docker build -t wisecow:local .
+
+      # Step 4: Test Docker image
+      - name: Test Docker image
+        run: |
+          docker run --rm -d --name wisecow-test -p 4499:4499 wisecow:local
+          echo "Waiting for container to start..."
+          sleep 10
+          echo "Checking health endpoint..."
+          curl -v http://localhost:4499 || true
+          docker stop wisecow-test
+
+      # Step 5: Load image into local K8s cluster (minikube/self-hosted)
+      - name: Load Docker image into cluster
+        run: |
+          # If using minikube
+          # minikube image load wisecow:local
+
+          # If using Docker Desktop / self-hosted cluster
+          kubectl delete pod -l app=wisecow --ignore-not-found
+          # Ensure your cluster nodes can access local images
+
+      # Step 6: Apply Kubernetes manifests
+      - name: Deploy to Kubernetes
+        run: |
+          kubectl apply -f wisecow-deployment.yaml
+          kubectl apply -f wisecow-service.yaml
+          kubectl apply -f wisecow-ingress.yaml
+
+      # Step 7: Wait for pods to be ready
+      - name: Wait for deployment rollout
+        run: |
+          kubectl rollout status deployment/wisecow-deployment --timeout=120s
+          kubectl get pods
+          kubectl get svc
+          kubectl get ingress
+
+      # Step 8: Validate final deployment
+      - name: Validate deployment with curl
+        run: |
+          echo "Waiting 10 seconds for service to stabilize..."
+          sleep 10
+
+          # Option 1: Validate using NodePort
+          NODE_PORT=$(kubectl get svc wisecow-service -o jsonpath='{.spec.ports[0].nodePort}')
+          echo "NodePort is $NODE_PORT"
+          curl -v http://localhost:$NODE_PORT || true
+
+          # Option 2: Validate using Ingress hostname if available
+          # INGRESS_HOST=$(kubectl get ingress wisecow-ingress -o jsonpath='{.spec.rules[0].host}')
+          # curl -vk https://$INGRESS_HOST || true
