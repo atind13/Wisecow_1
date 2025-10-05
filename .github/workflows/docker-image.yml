@@ -1,4 +1,4 @@
-name: Self-Hosted CI with Local Docker & Kubernetes
+name: Self-Hosted CI with Local Docker & Kubernetes (Kind)
 
 on:
   push:
@@ -18,30 +18,28 @@ jobs:
         uses: actions/checkout@v3
 
       # Step 2: Ensure Docker is available
-      - name: Docker version
+      - name: Check Docker version
         run: docker --version
 
-      # ✅ Step 3: Clean up any old containers before build
-      - name: Cleanup existing containers
+      # Step 3: Cleanup existing containers
+      - name: Cleanup old containers
         run: |
           echo "Cleaning up old Docker containers..."
           docker ps -aq | xargs -r docker stop || true
           docker ps -aq | xargs -r docker rm || true
           echo "Cleanup done."
 
-      # Step 4: Build local Docker image
+      # Step 4: Build Docker image
       - name: Build Docker image
         run: docker build -t wisecow:local .
 
-      # ✅ Step 5: Test Docker image safely (with cleanup)
+      # Step 5: Test image locally
       - name: Test Docker image
         run: |
           echo "Starting Wisecow container on port 4499..."
           docker run -d --name wisecow-test -p 4499:4499 wisecow:local
-          echo "Waiting for container to start..."
           sleep 10
-
-          echo "Checking health endpoint..."
+          echo "Checking endpoint..."
           if ! curl -f http://localhost:4499; then
             echo "⚠️ Health check failed, dumping logs..."
             docker logs wisecow-test || true
@@ -49,29 +47,35 @@ jobs:
             docker rm wisecow-test || true
             exit 1
           fi
-
           echo "✅ Wisecow container is healthy!"
           docker stop wisecow-test
           docker rm wisecow-test
 
-      # Step 6: Load image into local K8s cluster (minikube/self-hosted)
-      - name: Load Docker image into cluster
+      # ✅ Step 6: Set up Kind cluster
+      - name: Set up Kind cluster
         run: |
-          # If using minikube
-          # minikube image load wisecow:local
+          echo "Creating a fresh Kind cluster..."
+          kind delete cluster --name wisecow || true
+          kind create cluster --name wisecow --wait 60s
+          kubectl cluster-info
 
-          # If using Docker Desktop / self-hosted cluster
-          kubectl delete pod -l app=wisecow --ignore-not-found
-          echo "Image loaded and old pods cleared."
+      # Step 7: Load image into Kind
+      - name: Load Docker image into Kind
+        run: |
+          echo "Loading local image into Kind cluster..."
+          kind load docker-image wisecow:local --name wisecow
+          kubectl get nodes
+          echo "✅ Image loaded into Kind."
 
-      # Step 7: Apply Kubernetes manifests
-      - name: Deploy to Kubernetes
+      # Step 8: Apply Kubernetes manifests
+      - name: Deploy to Kubernetes (Kind)
         run: |
           kubectl apply -f wisecow-deployment.yaml
           kubectl apply -f wisecow-service.yaml
           kubectl apply -f wisecow-ingress.yaml
+          echo "✅ Manifests applied."
 
-      # Step 8: Wait for pods to be ready
+      # Step 9: Wait for pods to be ready
       - name: Wait for deployment rollout
         run: |
           kubectl rollout status deployment/wisecow-deployment --timeout=120s
@@ -79,24 +83,23 @@ jobs:
           kubectl get svc
           kubectl get ingress
 
-      # Step 9: Validate final deployment
-      - name: Validate deployment with curl
+      # Step 10: Validate deployment
+      - name: Validate deployment
         run: |
-          echo "Waiting 10 seconds for service to stabilize..."
+          echo "Waiting for service to stabilize..."
           sleep 10
-
-          # Option 1: Validate using NodePort
           NODE_PORT=$(kubectl get svc wisecow-service -o jsonpath='{.spec.ports[0].nodePort}')
           echo "NodePort is $NODE_PORT"
-          curl -v http://localhost:$NODE_PORT || true
+          CLUSTER_IP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' kind-control-plane)
+          echo "Accessing app at http://$CLUSTER_IP:$NODE_PORT"
+          curl -v http://$CLUSTER_IP:$NODE_PORT || true
 
-          # Option 2: Validate using Ingress hostname if available
-          # INGRESS_HOST=$(kubectl get ingress wisecow-ingress -o jsonpath='{.spec.rules[0].host}')
-          # curl -vk https://$INGRESS_HOST || true
-
-      # ✅ Step 10: Always cleanup after job
-      - name: Final Docker cleanup
+      # Step 11: Cleanup
+      - name: Cleanup Kind and Docker
         if: always()
         run: |
+          echo "Cleaning up resources..."
           docker stop wisecow-test || true
           docker rm wisecow-test || true
+          kind delete cluster --name wisecow || true
+          echo "✅ Cleanup complete."
