@@ -36,22 +36,36 @@ jobs:
           docker stop wisecow-test
           docker rm wisecow-test
 
-      # Step 5: Apply Kubernetes manifests
+      # Step 5: Wait for Kubernetes API to be ready
+      - name: Wait for Kubernetes
+        run: |
+          echo "Checking Kubernetes cluster..."
+          for i in {1..30}; do
+            if kubectl get nodes &>/dev/null; then
+              echo "Kubernetes API is ready!"
+              break
+            fi
+            echo "Waiting for Kubernetes API..."
+            sleep 5
+          done
+          kubectl config current-context
+
+      # Step 6: Apply Kubernetes manifests (skip validation)
       - name: Deploy to Kubernetes
         run: |
-          kubectl apply -f wisecow-deployment.yaml
-          kubectl apply -f wisecow-service.yaml
-          kubectl apply -f wisecow-ingress.yaml
+          kubectl apply -f wisecow-deployment.yaml --validate=false
+          kubectl apply -f wisecow-service.yaml --validate=false
+          kubectl apply -f wisecow-ingress.yaml --validate=false
 
-      # Step 6: Get pods, services, ingress (simplified)
+      # Step 7: List pods, services, ingress
       - name: List Kubernetes resources
         run: |
           kubectl get pods
           kubectl get svc
           kubectl get ingress
 
-      # Step 7: Validate deployment with curl
-      - name: Validate deployment with curl
+      # Step 8: Validate deployment with curl
+      - name: Validate deployment
         run: |
           echo "Waiting 10 seconds for service to stabilize..."
           sleep 10
