@@ -16,8 +16,7 @@ spec:
     spec:
       containers:
         - name: wisecow
-          image: wisecow:latest   # Use the locally available image
-          imagePullPolicy: IfNotPresent
+          image: wisecow:local   # Use your local Docker image
+          imagePullPolicy: Never  # Ensure Kubernetes uses the local image only
           ports:
             - containerPort: 4499
-
