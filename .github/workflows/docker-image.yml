@@ -1,4 +1,4 @@
-name: Self-Hosted CI with Local Docker & Kubernetes.
+name: Self-Hosted CI with Local Docker & Kubernetes
 
 on:
   push:
@@ -21,21 +21,40 @@ jobs:
       - name: Docker version
         run: docker --version
 
-      # Step 3: Build local Docker image
+      # ✅ Step 3: Clean up any old containers before build
+      - name: Cleanup existing containers
+        run: |
+          echo "Cleaning up old Docker containers..."
+          docker ps -aq | xargs -r docker stop || true
+          docker ps -aq | xargs -r docker rm || true
+          echo "Cleanup done."
+
+      # Step 4: Build local Docker image
       - name: Build Docker image
         run: docker build -t wisecow:local .
 
-      # Step 4: Test Docker image
+      # ✅ Step 5: Test Docker image safely (with cleanup)
       - name: Test Docker image
         run: |
-          docker run --rm -d --name wisecow-test -p 4499:4499 wisecow:local
+          echo "Starting Wisecow container on port 4499..."
+          docker run -d --name wisecow-test -p 4499:4499 wisecow:local
           echo "Waiting for container to start..."
           sleep 10
-          echo "Checking health endpoint..."
-          curl -v http://localhost:4499 || true
-          docker stop wisecow-test
 
-      # Step 5: Load image into local K8s cluster (minikube/self-hosted)
+          echo "Checking health endpoint..."
+          if ! curl -f http://localhost:4499; then
+            echo "⚠️ Health check failed, dumping logs..."
+            docker logs wisecow-test || true
+            docker stop wisecow-test || true
+            docker rm wisecow-test || true
+            exit 1
+          fi
+
+          echo "✅ Wisecow container is healthy!"
+          docker stop wisecow-test
+          docker rm wisecow-test
+
+      # Step 6: Load image into local K8s cluster (minikube/self-hosted)
       - name: Load Docker image into cluster
         run: |
           # If using minikube
@@ -43,24 +62,24 @@ jobs:
 
           # If using Docker Desktop / self-hosted cluster
           kubectl delete pod -l app=wisecow --ignore-not-found
-          # Ensure your cluster nodes can access local images
+          echo "Image loaded and old pods cleared."
 
-      # Step 6: Apply Kubernetes manifests
+      # Step 7: Apply Kubernetes manifests
       - name: Deploy to Kubernetes
         run: |
           kubectl apply -f wisecow-deployment.yaml
           kubectl apply -f wisecow-service.yaml
           kubectl apply -f wisecow-ingress.yaml
 
-      # Step 7: Wait for pods to be ready
+      # Step 8: Wait for pods to be ready
       - name: Wait for deployment rollout
         run: |
           kubectl rollout status deployment/wisecow-deployment --timeout=120s
-          kubectl get pods
+          kubectl get pods -o wide
           kubectl get svc
           kubectl get ingress
 
-      # Step 8: Validate final deployment
+      # Step 9: Validate final deployment
       - name: Validate deployment with curl
         run: |
           echo "Waiting 10 seconds for service to stabilize..."
@@ -74,3 +93,10 @@ jobs:
           # Option 2: Validate using Ingress hostname if available
           # INGRESS_HOST=$(kubectl get ingress wisecow-ingress -o jsonpath='{.spec.rules[0].host}')
           # curl -vk https://$INGRESS_HOST || true
+
+      # ✅ Step 10: Always cleanup after job
+      - name: Final Docker cleanup
+        if: always()
+        run: |
+          docker stop wisecow-test || true
+          docker rm wisecow-test || true
