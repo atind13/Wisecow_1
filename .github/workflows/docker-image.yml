@@ -1,4 +1,4 @@
-name: Self-Hosted CI with Local Docker & Kubernetes
+name: Self-Hosted CI with Local Docker & Kubernetes .
 
 on:
   push:
