@@ -1,0 +1,14 @@
+apiVersion: v1
+kind: Service
+metadata:
+  name: wisecow-service
+  labels:
+    app: wisecow
+spec:
+  selector:
+    app: wisecow
+  type: NodePort   # instead of ClusterIP
+  ports:
+    - port: 80
+      targetPort: 4499
+      nodePort: 30007   # fixed port between 30000–32767
