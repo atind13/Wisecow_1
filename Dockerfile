@@ -17,6 +17,9 @@ RUN chmod +x /app/wisecow.sh
 
 # Copy your server script into the container
 COPY wisecow.sh /app/wisecow.sh
+COPY wisecow.crt /etc/ssl/certs/
+COPY wisecow.key /etc/ssl/private/
+
 
 # Make it executable
 RUN chmod +x /app/wisecow.sh
